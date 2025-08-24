@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Custom Alert Example</title>
+<!-- SweetAlert2 CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+<style>
+/* Custom OK button style */
+.swal2-confirm {
+    background-color: #cfd8cf !important; /* light greenish */
+    color: #000 !important;
+    border-radius: 20px !important;
+    padding: 8px 20px !important;
+    border: 2px solid #000 !important;
+    font-weight: bold !important;
+}
+</style>
+</head>
+<body>
+
+<!-- Button to trigger alert -->
+<button onclick="showCustomAlert()">Show Alert</button>
+
+<!-- SweetAlert2 JS -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+function showCustomAlert() {
+    Swal.fire({
+        text: 'Please select at least one notification.',
+        icon: 'warning',
+        background: '#1e1e1e', // dark background
+        color: '#fff',         // white text
+        confirmButtonText: 'OK',
+        buttonsStyling: true,
+        allowOutsideClick: false
+    });
+}
+</script>
+
+</body>
+</html>
