@@ -35,13 +35,15 @@
             </span>
           </div>
         </div>
+      <!-- forgot -->
+        <p class="text-end"> <a href="forgot_password.php" class="text-decoration-none text-danger">Forgot Password?</a>
 
         <button type="submit" class="btn btn-primary w-100">Login</button>
 
         <!-- 🔗 Signup link -->
         <p class="text-center mt-3">
           Don't have an account?
-          <a href="signup.html" class="text-decoration-none fw-bold text-success">Sign up here</a>
+          <a href="index.html" class="text-decoration-none fw-bold text-success">Sign up here</a>
         </p>
 
       </form>
