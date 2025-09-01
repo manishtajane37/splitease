@@ -127,15 +127,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($error_message)) {
             // Keep existing profile pic unless new uploaded or removed
-            $profile_pic = $user['profile_pic'] ?? 'default.png';
+            $profile_pic = $user['profile_pic'] ?? 'default.jpg';
 
             // Handle profile picture removal
             if (isset($_POST['remove_photo']) && $_POST['remove_photo'] == '1') {
                 // Delete old profile picture if it exists and is not default
-                if ($user['profile_pic'] && $user['profile_pic'] !== 'default.png' && file_exists('uploads/' . $user['profile_pic'])) {
+                if ($user['profile_pic'] && $user['profile_pic'] !== 'uploads/default.jpg' && file_exists('uploads/' . $user['profile_pic'])) {
                     unlink('uploads/' . $user['profile_pic']);
                 }
-                $profile_pic = 'default.png';
+                $profile_pic = 'uploads/default.jpg';
             }
             // Handle cropped image data
             elseif (isset($_POST['cropped_image']) && !empty($_POST['cropped_image'])) {
@@ -159,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         
                         if (file_put_contents($fullPath, $imageData)) {
                             // Delete old profile picture if it exists and is not default
-                            if ($user['profile_pic'] && $user['profile_pic'] !== 'default.png' && file_exists('uploads/' . $user['profile_pic'])) {
+                            if ($user['profile_pic'] && $user['profile_pic'] !== 'uploads/default.jpg' && file_exists('uploads/' . $user['profile_pic'])) {
                                 unlink('uploads/' . $user['profile_pic']);
                             }
                             $profile_pic = $newFileName;
@@ -1017,9 +1017,41 @@ $showSuccess = isset($_GET['updated']) && $_GET['updated'] == '1';
                 <li><a href="add_expense.php"><i class="fas fa-plus-circle"></i> Add Expense</a></li>
                 <li><a href="settlements.php"><i class="fas fa-handshake"></i> Settlements</a></li>
                 <li><a href="profile.php" class="active"><i class="fas fa-user"></i> My Profile</a></li> 
-                <li><a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+                <li> <a href="#" id="logout-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
             </ul>
         </div>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.getElementById('logout-link').addEventListener('click', function(e) {
+    e.preventDefault(); // Stay on the same page
+
+    Swal.fire({
+        title: "Are you sure?",
+        text: "You will be logged out from your account!",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#d33",
+        cancelButtonColor: "#3085d6",
+        confirmButtonText: "Yes, Logout",
+        cancelButtonText: "Cancel"
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Show green tick
+            Swal.fire({
+                title: "Logged Out!",
+                icon: "success",
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // Redirect to logout.php after 1.5 sec
+            setTimeout(() => {
+                window.location.href = 'login.php';
+            }, 1500);
+        }
+    });
+});
+</script>
 
         <!-- Main Content -->
         <div class="main-content" id="mainContent">
@@ -1135,19 +1167,19 @@ $showSuccess = isset($_GET['updated']) && $_GET['updated'] == '1';
                 <div class="profile-header">
                     <div class="profile-avatar">
                         <?php 
-                        $profilePicPath = (!empty($user['profile_pic']) && $user['profile_pic'] !== 'default.png') 
+                        $profilePicPath = (!empty($user['profile_pic']) && $user['profile_pic'] !== 'default.jpg') 
                             ? 'uploads/' . htmlspecialchars($user['profile_pic'])
-                            : 'uploads/default.png';
+                            : 'uploads/default.jpg';
                         ?>
                         <img id="avatarImg" src="<?php echo $profilePicPath; ?>" alt="Profile" class="avatar-img" 
-                             onerror="this.src='uploads/default.png'" loading="eager">
+                             onerror="this.src='uploads/default.jpg'" loading="eager">
                         <?php if ($edit_mode): ?>
                         <div class="avatar-actions">
                             <div class="avatar-action upload" onclick="document.getElementById('avatarInput').click()" title="Change Photo">
                                 <i class="fas fa-camera"></i>
                                 <input type="file" id="avatarInput" accept="image/*">
                             </div>
-                            <?php if (!empty($user['profile_pic']) && $user['profile_pic'] !== 'default.png'): ?>
+                            <?php if (!empty($user['profile_pic']) && $user['profile_pic'] !== 'default.jpg'): ?>
                             <div class="avatar-action remove" onclick="showRemovePhotoModal()" title="Remove Photo">
                                 <i class="fas fa-trash-alt"></i>
                             </div>
@@ -1427,7 +1459,7 @@ $showSuccess = isset($_GET['updated']) && $_GET['updated'] == '1';
             document.getElementById('croppedImageData').value = '';
             
             // Update avatar preview to default
-            document.getElementById('avatarImg').src = 'uploads/default.png';
+            document.getElementById('avatarImg').src = 'uploads/default.jpg';
             
             // Hide the remove button
             const removeBtn = document.querySelector('.avatar-action.remove');
@@ -1676,7 +1708,7 @@ $showSuccess = isset($_GET['updated']) && $_GET['updated'] == '1';
 
         // Image loading error handling
         document.getElementById('avatarImg').addEventListener('error', function() {
-            this.src = 'uploads/default.png';
+            this.src = 'uploads/default.jpg';
         });
 
         // Enhanced button hover effects

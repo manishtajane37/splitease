@@ -1,6 +1,8 @@
-<?php
+ <?php
 require_once 'db.php';
 require_once 'functions.php'; // contains addNotification()
+
+
 session_start();
 
 // Redirect if not logged in
@@ -11,7 +13,7 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
-// Get group_id from URL if provided
+// Get group_id from URL if providedwhat
 $group_id = isset($_GET['group_id']) ? intval($_GET['group_id']) : null;
 
 // 🔧 POST REQUEST HANDLER - Handle partial payments first
@@ -102,45 +104,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['partial_id']) && isse
     exit();
 }
 
-// 🔧 POST REQUEST HANDLER - Handle mark paid approval requests
+// 🔧 POST REQUEST HANDLER - Handle mark paid requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_paid_id'])) {
     $settlement_id = intval($_POST['mark_paid_id']);
     
-    // CRITICAL FIX: Verify settlement exists and is in correct state before redirect
-    $verify_stmt = $conn->prepare("SELECT id, status FROM settlements WHERE id = ? AND (paid_by = ? OR paid_to = ?)");
-    $verify_stmt->bind_param("iii", $settlement_id, $user_id, $user_id);
-    $verify_stmt->execute();
-    $verify_result = $verify_stmt->get_result();
-    $settlement_check = $verify_result->fetch_assoc();
+    // Get settlement details with user info
+    $stmt = $conn->prepare("SELECT s.*, u1.username AS payer_name, u2.username AS receiver_name 
+                           FROM settlements s
+                           JOIN users u1 ON s.paid_by = u1.id
+                           JOIN users u2 ON s.paid_to = u2.id
+                           WHERE s.id = ? AND (s.paid_by = ? OR s.paid_to = ?)");
+    $stmt->bind_param("iii", $settlement_id, $user_id, $user_id);
+    $stmt->execute();
+    $settlement = $stmt->get_result()->fetch_assoc();
     
-    if (!$settlement_check) {
-        $_SESSION['error'] = "Settlement not found or access denied.";
-        header("Location: settlements.php" . ($group_id ? "?group_id=$group_id" : ""));
-        exit();
+    if ($settlement && in_array($settlement['status'], ['pending', 'partial'])) {
+        // Only payer can mark as paid
+        if ($user_id !== $settlement['paid_by']) {
+            $_SESSION['error'] = "Only the payer can mark this settlement as paid.";
+        } else {
+            $amount = floatval($settlement['amount']);
+            $now = date("Y-m-d H:i:s");
+            
+            // ✅ FIX: Set to awaiting_confirmation and update partial_paid_amount
+            $stmt = $conn->prepare("UPDATE settlements SET partial_paid_amount = ?, status = 'awaiting_confirmation', updated_at = ? WHERE id = ?");
+            $stmt->bind_param("dsi", $amount, $now, $settlement_id);
+            
+            if ($stmt->execute()) {
+                $payer_name = $settlement['payer_name'];
+                $receiver_name = $settlement['receiver_name'];
+                
+                // Send notifications for awaiting confirmation
+                addNotification($conn, $settlement['paid_to'], "$payer_name marked ₹" . number_format($amount, 2) . " as paid - Please confirm receipt!", "settlements.php");
+                addNotification($conn, $settlement['paid_by'], "You marked payment to $receiver_name as paid - Awaiting confirmation.", "settlements.php");
+                
+                $_SESSION['success'] = "Payment marked as paid! Now waiting for " . $receiver_name . " to confirm receipt.";
+                
+                // Debug logging
+                error_log("MARK AS PAID: Settlement ID $settlement_id set to awaiting_confirmation by user $user_id");
+            } else {
+                $_SESSION['error'] = "Failed to mark payment as paid. Please try again.";
+            }
+        }
+    } else {
+        $_SESSION['error'] = "Settlement not found or cannot be marked as paid.";
     }
     
-    if (!in_array($settlement_check['status'], ['pending', 'partial'])) {
-        $_SESSION['error'] = "Settlement cannot be marked as paid in its current status: " . $settlement_check['status'];
-        header("Location: settlements.php" . ($group_id ? "?group_id=$group_id" : ""));
-        exit();
-    }
-    
-    // Log for debugging
-    error_log("MARK PAID POST: Settlement ID {$settlement_id}, Status: {$settlement_check['status']}, User: {$user_id}");
-    
-    // Build the redirect URL properly
-    $redirect_url = "settlement_approval.php?id=" . $settlement_id;
-    if ($group_id) {
-        $redirect_url .= "&group_id=" . $group_id;
-    }
-    
-    // Clear any existing output buffers
-    if (ob_get_level()) {
-        ob_end_clean();
-    }
-    
-    // Send redirect header - this ensures EVERY mark paid goes through confirmation
-    header("Location: " . $redirect_url);
+    // Redirect back to settlements page
+    header("Location: settlements.php" . ($group_id ? "?group_id=$group_id" : ""));
     exit();
 }
 
@@ -173,11 +184,15 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
 
         switch ($action) {
             case 'confirm_paid':
-                // CONSISTENT: Always redirect to settlement_approval.php
-                $redirect_params = $group_id ? "?group_id=$group_id" : "";
-                header("Location: settlement_approval.php?id=$id" . ($redirect_params ? "&" . ltrim($redirect_params, '?') : ""));
-                exit();
-                break;
+    // ✅ FIX: Only handle awaiting_confirmation status here
+    if ($current_status === 'awaiting_confirmation') {
+        $redirect_params = $group_id ? "?group_id=$group_id" : "";
+        header("Location: settlement_approval.php?id=$id" . ($redirect_params ? "&" . ltrim($redirect_params, '?') : ""));
+        exit();
+    } else {
+        $_SESSION['error'] = "This settlement is not awaiting confirmation.";
+    }
+    break;
 
             case 'send_reminder':
                 if ($current_status === 'pending' || $current_status === 'partial') {
@@ -216,12 +231,16 @@ if (isset($_GET['action']) && isset($_GET['id'])) {
                 }
                 break;
 
-            case 'approve_cancel':
-                // FIXED: Proper parameter handling
-                $redirect_params = $group_id ? "?group_id=$group_id" : "";
-                header("Location: settlement_approval.php?id=$id" . ($redirect_params ? "&" . ltrim($redirect_params, '?') : ""));
-                exit();
-                break;
+           case 'approve_cancel':
+    // Only handle cancel_request status here
+    if ($current_status === 'cancel_request') {
+        $redirect_params = $group_id ? "?group_id=$group_id" : "";
+        header("Location: settlement_approval.php?id=$id" . ($redirect_params ? "&" . ltrim($redirect_params, '?') : ""));
+        exit();
+    } else {
+        $_SESSION['error'] = "This settlement is not pending cancellation approval.";
+    }
+    break;
 
             case 'reject_cancel':
                 if ($current_status === 'cancel_request') {
@@ -321,11 +340,12 @@ $summary = $stmt_summary->get_result()->fetch_assoc();
 // Get group info if group_id is provided
 $group_info = null;
 if ($group_id) {
-    $stmt_group = $conn->prepare("SELECT name FROM groups WHERE id = ?");
+    $stmt_group = $conn->prepare("SELECT name, is_expenses_final FROM groups WHERE id = ?");
     $stmt_group->bind_param("i", $group_id);
     $stmt_group->execute();
     $group_info = $stmt_group->get_result()->fetch_assoc();
 }
+
 
 // Get user's groups for navigation
 $stmt_groups = $conn->prepare("
@@ -563,6 +583,28 @@ body::before {
     background: linear-gradient(135deg, #17a2b8, #138496);
     color: white;
     box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
+    animation: subtle-pulse 3s infinite;
+}
+
+@keyframes subtle-pulse {
+    0%, 100% { 
+        box-shadow: 0 4px 15px rgba(23, 162, 184, 0.3);
+        transform: scale(1);
+    }
+    50% { 
+        box-shadow: 0 6px 20px rgba(23, 162, 184, 0.5);
+        transform: scale(1.02);
+    }
+}
+
+/* Make the confirmation buttons more prominent */
+.btn:has(i.fa-check-circle) {
+    animation: gentle-glow 2s infinite alternate;
+}
+
+@keyframes gentle-glow {
+    0% { box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3); }
+    100% { box-shadow: 0 4px 16px rgba(40, 167, 69, 0.6); }
 }
 
 /* Enhanced Table Styling */
@@ -703,14 +745,14 @@ body::before {
     border-radius: 10px;
     padding: 12px 24px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(38, 0, 0, 0.8);
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
 }
 
 .nav-pills .nav-link:hover {
-    color: white;
+    color: black;
     background: rgba(255, 255, 255, 0.1);
     transform: translateY(-1px);
 }
@@ -815,7 +857,7 @@ body::before {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 15px 15px 0 0 !important;
 }
-    </style>
+</style>
 </head>
 <body>
 
@@ -1097,65 +1139,86 @@ body::before {
                             <td>
                                 <div class="btn-group-vertical">
                                     <?php if ($row['status'] === 'pending' || $row['status'] === 'partial'): ?>
-                                        <!-- Enhanced form with better error handling -->
-                                        <form method="post" style="display: inline;" onsubmit="return handleMarkPaid(this, <?= $row['id'] ?>);">
-                                            <input type="hidden" name="mark_paid_id" value="<?= $row['id'] ?>">
-                                            <button type="submit" class="btn btn-success btn-sm" id="mark-paid-<?= $row['id'] ?>">
-                                                <i class="fas fa-check"></i> Mark Paid
+                                        <!-- Enhanced form with better workflow handling -->
+                                        <?php if ($group_info && $group_info['is_expenses_final'] == 1): ?>
+                                            <?php if ($user_id == $row['paid_by']): // Only payer can mark as paid ?>
+                                                <form method="post" style="display: inline;" onsubmit="return handleMarkPaid(this, <?= $row['id'] ?>);">
+                                                    <input type="hidden" name="mark_paid_id" value="<?= $row['id'] ?>">
+                                                    <button type="submit" class="btn btn-success btn-sm" id="mark-paid-<?= $row['id'] ?>">
+                                                        <i class="fas fa-check"></i> Mark as Paid
+                                                    </button>
+                                                </form>
+                                            <?php elseif ($user_id == $row['paid_to']): // Show different button for receiver ?>
+                                                <button class="btn btn-info btn-sm" disabled>
+                                                    <i class="fas fa-eye"></i> Waiting for Payment
+                                                </button>
+                                                <div><small class="text-muted">Waiting for payer to mark as paid</small></div>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <button class="btn btn-secondary btn-sm" disabled>
+                                                <i class="fas fa-lock"></i> Mark Paid
                                             </button>
-                                        </form>
+                                            <div><small class="text-muted">Finalize expenses before marking paid</small></div>
+                                        <?php endif; ?>
                                         
                                         <?php if ($remaining > 0.01): // Only show Add Payment if there's remaining amount ?>
-                                        <a class="btn btn-primary btn-sm" href="settlements.php?action=partial&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>">
-                                            <i class="fas fa-credit-card"></i> Add Payment
-                                        </a>
+                                            <a class="btn btn-primary btn-sm" href="settlements.php?action=partial&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>">
+                                                <i class="fas fa-credit-card"></i> Add Payment
+                                            </a>
                                         <?php endif; ?>
                                         
                                         <?php if ($user_id == $row['paid_to']): // Only receiver can send reminders ?>
-                                        <a class="btn btn-warning btn-sm" href="settlements.php?action=send_reminder&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Send payment reminder?');">
-                                            <i class="fas fa-bell"></i> Remind
-                                        </a>
+                                            <a class="btn btn-warning btn-sm" href="settlements.php?action=send_reminder&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Send payment reminder?');">
+                                                <i class="fas fa-bell"></i> Remind
+                                            </a>
                                         <?php endif; ?>
                                         
                                         <a class="btn btn-danger btn-sm" href="settlements.php?action=request_cancel&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Request to cancel this settlement?');">
                                             <i class="fas fa-times"></i> Cancel
                                         </a>
-                                    <?php elseif ($row['status'] === 'cancel_request'): ?>
-                                        <?php if ($user_id == $row['paid_to']): // Only receiver can approve/reject cancellation ?>
-                                        <a class="btn btn-success btn-sm" href="settlement_approval.php?id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Approve cancellation request?');">
-                                            <i class="fas fa-check"></i> Approve
-                                        </a>
-                                        <a class="btn btn-danger btn-sm" href="settlements.php?action=reject_cancel&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Reject cancellation request?');">
-                                            <i class="fas fa-times"></i> Reject
-                                        </a>
-                                        <?php else: ?>
-                                        <small class="text-muted">Awaiting response...</small>
-                                        <?php endif; ?>
+
                                     <?php elseif ($row['status'] === 'awaiting_confirmation'): ?>
+                                        <!-- FIXED: Better display for awaiting confirmation state -->
                                         <?php if ($user_id == $row['paid_to']): // Only receiver can confirm ?>
-                                        <a class="btn btn-success btn-sm" 
-                                        href="settlement_approval.php?id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>"
-                                        onclick="return confirm('Confirm that you received the full payment of ₹<?= number_format($total, 2) ?>?');">
-                                            <i class="fas fa-check-circle"></i> Confirm Receipt
-                                        </a>
-                                        <div class="mt-1">
-                                            <small class="text-info">
-                                                <i class="fas fa-info-circle me-1"></i>
-                                                Payment completed - awaiting your confirmation
-                                            </small>
-                                        </div>
-                                        <?php else: ?>
-                                        <div class="text-center">
-                                            <small class="text-muted">
-                                                <i class="fas fa-clock me-1"></i>
-                                                Awaiting receiver confirmation...
-                                            </small>
+                                            <a class="btn btn-success btn-sm" 
+                                               href="settlement_approval.php?id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>"
+                                               onclick="return confirm('Confirm that you received the full payment of ₹<?= number_format($total, 2) ?>?');">
+                                                <i class="fas fa-check-circle"></i> Confirm Receipt
+                                            </a>
                                             <div class="mt-1">
-                                                <small class="text-success">
-                                                    Payment completed: ₹<?= number_format($total, 2) ?>
+                                                <small class="text-info">
+                                                    <i class="fas fa-info-circle me-1"></i>
+                                                    <?= htmlspecialchars($row['payer']) ?> marked this as paid - please confirm
                                                 </small>
                                             </div>
-                                        </div>
+                                        <?php else: ?>
+                                            <div class="text-center">
+                                                <small class="text-success">
+                                                    <i class="fas fa-check me-1"></i>
+                                                    Payment marked as sent
+                                                </small>
+                                                <div class="mt-1">
+                                                    <small class="text-muted">
+                                                        <i class="fas fa-clock me-1"></i>
+                                                        Waiting for <?= htmlspecialchars($row['receiver']) ?> to confirm receipt
+                                                    </small>
+                                                </div>
+                                            </div>
+                                        <?php endif; ?>
+
+                                    <?php elseif ($row['status'] === 'cancel_request'): ?>
+                                        <?php if ($user_id == $row['paid_to']): // Only receiver can approve/reject cancellation ?>
+                                            <a class="btn btn-success btn-sm" href="settlement_approval.php?id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Approve cancellation request?');">
+                                                <i class="fas fa-check"></i> Approve Cancel
+                                            </a>
+                                            <a class="btn btn-danger btn-sm" href="settlements.php?action=reject_cancel&id=<?= $row['id'] ?><?= $group_id ? "&group_id=$group_id" : "" ?>" onclick="return confirm('Reject cancellation request?');">
+                                                <i class="fas fa-times"></i> Reject Cancel
+                                            </a>
+                                        <?php else: ?>
+                                            <small class="text-muted">
+                                                <i class="fas fa-clock me-1"></i>
+                                                Cancellation request sent - awaiting response
+                                            </small>
                                         <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
@@ -1175,109 +1238,109 @@ body::before {
         </div>
     </div>
 
-        <!-- Completed Settlements -->
-        <div class="card table-custom">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0">
-                    <i class="fas fa-check-circle me-2"></i>Completed Settlements
-                    <span class="badge bg-light text-dark ms-2"><?= $completed_result->num_rows ?></span>
-                </h5>
-            </div>
-            <div class="card-body p-0">
-                <?php if ($completed_result->num_rows > 0): ?>
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Payer</th>
-                                <th>Receiver</th>
-                                <?php if (!$group_id): ?><th>Group</th><?php endif; ?>
-                                <th>Amount</th>
-                                <th>Status</th>
-                                <th>Completed</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php while ($row = $completed_result->fetch_assoc()): ?>
-                            <tr>
-                                <td>
-                                    <div class="d-flex align-items-center">
-                                        <div class="bg-secondary rounded-circle text-white d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px; font-size: 14px;">
-                                            <?= strtoupper(substr($row['payer'], 0, 1)) ?>
-                                        </div>
-                                        <?= htmlspecialchars($row['payer']) ?>
-                                        <?php if ($row['paid_by'] == $user_id): ?>
-                                            <small class="text-muted ms-1">(You)</small>
-                                        <?php endif; ?>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div class="d-flex align-items-center">
-                                        <div class="bg-secondary rounded-circle text-white d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px; font-size: 14px;">
-                                            <?= strtoupper(substr($row['receiver'], 0, 1)) ?>
-                                        </div>
-                                        <?= htmlspecialchars($row['receiver']) ?>
-                                        <?php if ($row['paid_to'] == $user_id): ?>
-                                            <small class="text-muted ms-1">(You)</small>
-                                        <?php endif; ?>
-                                    </div>
-                                </td>
-                                <?php if (!$group_id): ?>
-                                <td>
-                                    <?php if ($row['group_name']): ?>
-                                        <small class="badge bg-light text-dark">
-                                            <i class="fas fa-users me-1"></i><?= htmlspecialchars($row['group_name']) ?>
-                                        </small>
-                                    <?php else: ?>
-                                        <small class="text-muted">No Group</small>
-                                    <?php endif; ?>
-                                </td>
-                                <?php endif; ?>
-                                <td><strong>₹<?= number_format($row['amount'], 2) ?></strong></td>
-                                <td>
-                                    <span class="status-badge status-<?= $row['status'] ?>">
-                                        <?= ucwords($row['status']) ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <small>
-                                        <?= $row['settled_at'] ? date('M j, Y g:i A', strtotime($row['settled_at'])) : '-' ?>
-                                    </small>
-                                </td>
-                            </tr>
-                        <?php endwhile; ?>
-                        </tbody>
-                    </table>
-                </div>
-                <?php else: ?>
-                    <div class="text-center py-5">
-                        <i class="fas fa-history fa-3x text-muted mb-3"></i>
-                        <h5 style="color: #333;">No completed settlements yet</h5>
-                        <p class="text-muted">Your settlement history will appear here.</p>
-                    </div>
-                <?php endif; ?>
-            </div>
+    <!-- Completed Settlements -->
+    <div class="card table-custom">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0">
+                <i class="fas fa-check-circle me-2"></i>Completed Settlements
+                <span class="badge bg-light text-dark ms-2"><?= $completed_result->num_rows ?></span>
+            </h5>
         </div>
-
-        <!-- Action Buttons -->
-        <div class="row mt-4 mb-5">
-            <div class="col-12 text-center">
-                <div class="btn-group" role="group">
-                    <?php if ($group_id): ?>
-                        <a href="view_group.php?group_id=<?= $group_id ?>" class="btn btn-outline-light btn-lg">
-                            <i class="fas fa-users me-1"></i>Back to Group
-                        </a>
-                    <?php else: ?>
-                        <a href="dash.php" class="btn btn-outline-light btn-lg">
-                            <i class="fas fa-home me-1"></i>Back to Dashboard
-                        </a>
-                    <?php endif; ?>
-                </div>
+        <div class="card-body p-0">
+            <?php if ($completed_result->num_rows > 0): ?>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Payer</th>
+                            <th>Receiver</th>
+                            <?php if (!$group_id): ?><th>Group</th><?php endif; ?>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Completed</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php while ($row = $completed_result->fetch_assoc()): ?>
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="bg-secondary rounded-circle text-white d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px; font-size: 14px;">
+                                        <?= strtoupper(substr($row['payer'], 0, 1)) ?>
+                                    </div>
+                                    <?= htmlspecialchars($row['payer']) ?>
+                                    <?php if ($row['paid_by'] == $user_id): ?>
+                                        <small class="text-muted ms-1">(You)</small>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="bg-secondary rounded-circle text-white d-flex align-items-center justify-content-center me-2" style="width: 32px; height: 32px; font-size: 14px;">
+                                        <?= strtoupper(substr($row['receiver'], 0, 1)) ?>
+                                    </div>
+                                    <?= htmlspecialchars($row['receiver']) ?>
+                                    <?php if ($row['paid_to'] == $user_id): ?>
+                                        <small class="text-muted ms-1">(You)</small>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                            <?php if (!$group_id): ?>
+                            <td>
+                                <?php if ($row['group_name']): ?>
+                                    <small class="badge bg-light text-dark">
+                                        <i class="fas fa-users me-1"></i><?= htmlspecialchars($row['group_name']) ?>
+                                    </small>
+                                <?php else: ?>
+                                    <small class="text-muted">No Group</small>
+                                <?php endif; ?>
+                            </td>
+                            <?php endif; ?>
+                            <td><strong>₹<?= number_format($row['amount'], 2) ?></strong></td>
+                            <td>
+                                <span class="status-badge status-<?= $row['status'] ?>">
+                                    <?= ucwords($row['status']) ?>
+                                </span>
+                            </td>
+                            <td>
+                                <small>
+                                    <?= $row['settled_at'] ? date('M j, Y g:i A', strtotime($row['settled_at'])) : '-' ?>
+                                </small>
+                            </td>
+                        </tr>
+                    <?php endwhile; ?>
+                    </tbody>
+                </table>
             </div>
+            <?php else: ?>
+                <div class="text-center py-5">
+                    <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                    <h5 style="color: #333;">No completed settlements yet</h5>
+                    <p class="text-muted">Your settlement history will appear here.</p>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Action Buttons -->
+    <div class="row mt-4 mb-5">
+        <div class="col-12 text-center">
+            <div class="btn-group" role="group">
+                <?php if ($group_id): ?>
+                    <a href="view_group.php?group_id=<?= $group_id ?>" class="btn btn-outline-light btn-lg">
+                        <i class="fas fa-users me-1"></i>Back to Group
+                    </a>
+                <?php else: ?>
+                    <a href="dash.php" class="btn btn-outline-light btn-lg">
+                        <i class="fas fa-home me-1"></i>Back to Dashboard
+                    </a>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     // Enhanced form handling for mark paid
     function handleMarkPaid(form, settlementId) {
@@ -1401,6 +1464,7 @@ body::before {
     // Debug: Check if page loaded properly
     console.log('Settlements page loaded');
     console.log('Current URL:', window.location.href);
+    
     </script>
     </body>
     </html>

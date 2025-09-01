@@ -35,9 +35,9 @@ if ($result->num_rows > 0) {
     $email = $user['email'];
     $phone = $user['phone'];
     // Handle profile picture path properly
-    $profile_pic = (!empty($user['profile_pic']) && $user['profile_pic'] !== 'default.png') 
+    $profile_pic = (!empty($user['profile_pic']) && $user['profile_pic'] !== 'uploads/default.jpg') 
                    ? $user['profile_pic'] 
-                   : 'default.png';
+                   : 'uploads/default.jpg';
 } else {
     // Handle case where user not found
     header("Location: logout.php");
@@ -456,9 +456,41 @@ $settlement_details = getSettlementDetails($conn, $user_id);
                 <li><a href="add_expense.php"><i class="fas fa-plus-circle"></i> Add Expense</a></li>
                 <li><a href="settlements.php"><i class="fas fa-handshake"></i> Settlements</a></li>
                 <li><a href="profile.php"><i class="fas fa-user"></i> My Profile</a></li> 
-                <li><a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+              <li> <a href="#" id="logout-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
             </ul>
         </div>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.getElementById('logout-link').addEventListener('click', function(e) {
+    e.preventDefault(); // Stay on the same page
+
+    Swal.fire({
+        title: "Are you sure?",
+        text: "You will be logged out from your account!",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#d33",
+        cancelButtonColor: "#3085d6",
+        confirmButtonText: "Yes, Logout",
+        cancelButtonText: "Cancel"
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Show green tick
+            Swal.fire({
+                title: "Logged Out!",
+                icon: "success",
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // Redirect to logout.php after 1.5 sec
+            setTimeout(() => {
+                window.location.href = 'login.php';
+            }, 1500);
+        }
+    });
+});
+</script>
 
         <!-- Main Content -->
         <div class="main-content" id="mainContent">
@@ -471,7 +503,7 @@ $settlement_details = getSettlementDetails($conn, $user_id);
                     
                     // Check if file exists, if not use default
                     if (!file_exists($profilePicPath)) {
-                        $profilePicPath = 'uploads/default.png';
+                        $profilePicPath = 'uploads/default.jpg';
                         // If default doesn't exist either, create a placeholder
                         if (!file_exists($profilePicPath)) {
                             $profilePicPath = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTAiIGhlaWdodD0iNTAiIHZpZXdCb3g9IjAgMCA1MCA1MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjUiIGN5PSIyNSIgcj0iMjUiIGZpbGw9IiNlMGU3ZmYiLz4KPHN2ZyB4PSIxMiIgeT0iMTIiIHdpZHRoPSIyNiIgaGVpZ2h0PSIyNiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2MzY2ZjEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KPHBhdGggZD0iMjAgMjF2LTJhNCA0IDAgMCAwLTQtNEg4YTQgNCAwIDAgMC00IDR2MiIvPgo8Y2lyY2xlIGN4PSIxMiIgY3k9IjciIHI9IjQiLz4KPC9zdmc+Cjwvc3ZnPg==';

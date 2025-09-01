@@ -578,9 +578,41 @@ body::before {
                 <li><a href="add_expense.php"><i class="fas fa-plus-circle"></i> Add Expense</a></li>
                 <li><a href="settlements.php"><i class="fas fa-handshake"></i> Settlements</a></li>
                 <li><a href="profile.php"><i class="fas fa-user"></i> My Profile</a></li> 
-                <li><a href="login.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+                <li> <a href="#" id="logout-link"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
             </ul>
         </div>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.getElementById('logout-link').addEventListener('click', function(e) {
+    e.preventDefault(); // Stay on the same page
+
+    Swal.fire({
+        title: "Are you sure?",
+        text: "You will be logged out from your account!",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#d33",
+        cancelButtonColor: "#3085d6",
+        confirmButtonText: "Yes, Logout",
+        cancelButtonText: "Cancel"
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Show green tick
+            Swal.fire({
+                title: "Logged Out!",
+                icon: "success",
+                timer: 1500,
+                showConfirmButton: false
+            });
+
+            // Redirect to logout.php after 1.5 sec
+            setTimeout(() => {
+                window.location.href = 'login.php';
+            }, 1500);
+        }
+    });
+});
+</script>
 
         <!-- Main Content -->
         <div class="main-content" id="mainContent">
@@ -638,20 +670,122 @@ body::before {
                                                 <i class="fas fa-user-plus me-2"></i>Add Members
                                             </a>
 
-                                            <form method="POST" action="delete_group.php" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this group?');">
-                                                <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                <button type="submit" class="btn btn-danger">
-                                                    <i class="fas fa-trash me-2"></i>Delete Group
-                                                </button>
-                                            </form>
+                                          
+
+
+<!-- Delete Group Form -->
+<form method="POST" action="delete_group.php" class="d-inline delete-form">
+    <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
+    <button type="submit" class="btn btn-danger">
+        <i class="fas fa-trash me-2"></i>Delete Group
+    </button>
+</form>
+
+<!-- SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.querySelectorAll('.delete-form').forEach(form => {
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        Swal.fire({
+            title: "Are you sure?",
+            text: "This will permanently delete the group!",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#d33",
+            cancelButtonColor: "#3085d6",
+            confirmButtonText: "Yes, Delete",
+            cancelButtonText: "Cancel"
+        }).then((result) => {
+            if (result.isConfirmed) {
+
+                // 🔥 AJAX request bhejna
+                fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form)
+                })
+                .then(res => res.text())
+                .then(() => {
+                    // ✅ Success alert
+                    Swal.fire({
+                        icon: "success",
+                        title: "Deleted!",
+                        text: "Group has been removed successfully.",
+                        showConfirmButton: false,
+                        timer: 2000
+                    }).then(() => {
+                        window.location.href = "group.php"; // redirect after delete
+                    });
+                })
+                .catch(() => {
+                    Swal.fire("Error!", "Something went wrong.", "error");
+                });
+
+            }
+        });
+    });
+});
+</script>
+
+
                                         <?php else: ?>
-                                            <form method="POST" action="exit_group.php" class="d-inline" onsubmit="return confirm('Do you want to exit this group?');">
-                                                <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
-                                                <input type="hidden" name="user_id" value="<?php echo $user_id; ?>">
-                                                <button type="submit" class="btn btn-warning">
-                                                    <i class="fas fa-sign-out-alt me-2"></i>Exit Group
-                                                </button>
-                                            </form>
+                                           <!-- Exit Group Form -->
+<form method="POST" action="exit_group.php" class="d-inline exit-form">
+    <input type="hidden" name="group_id" value="<?php echo $group['id']; ?>">
+    <input type="hidden" name="user_id" value="<?php echo $user_id; ?>">
+    <button type="submit" class="btn btn-warning">
+        <i class="fas fa-sign-out-alt me-2"></i>Exit Group
+    </button>
+</form>
+
+<!-- SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+document.querySelectorAll('.exit-form').forEach(form => {
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        Swal.fire({
+            title: "Are you sure?",
+            text: "You will exit from this group!",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonColor: "#f0ad4e",
+            cancelButtonColor: "#3085d6",
+            confirmButtonText: "Yes, Exit",
+            cancelButtonText: "Cancel"
+        }).then((result) => {
+            if (result.isConfirmed) {
+
+                // 🔥 AJAX request bhejna
+                fetch(form.action, {
+                    method: "POST",
+                    body: new FormData(form)
+                })
+                .then(res => res.text())
+                .then(() => {
+                    // ✅ Success alert
+                    Swal.fire({
+                        icon: "success",
+                        title: "Exited!",
+                        text: "You have successfully exited from the group.",
+                        showConfirmButton: false,
+                        timer: 2000
+                    }).then(() => {
+                        window.location.href = "group.php"; // redirect after exit
+                    });
+                })
+                .catch(() => {
+                    Swal.fire("Error!", "Something went wrong.", "error");
+                });
+
+            }
+        });
+    });
+});
+</script>
+
                                         <?php endif; ?>
                                     </div>
                                 </div>

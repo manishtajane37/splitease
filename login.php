@@ -76,18 +76,60 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
 
-        if (password_verify($password, $user['password'])) {
+       if (password_verify($password, $user['password'])) {
             // ✅ Store user info in session
             $_SESSION['user_id'] = $user['id'];
-            $_SESSION['username'] = $user['username']; // ✅ Save username
+            $_SESSION['username'] = $user['username'];
 
-            header("Location: dash.php");
+            // ✅ Show SweetAlert success
+            echo "
+            <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
+            <script>
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Welcome, " . addslashes($user['username']) . "!',
+                    text: 'Login successful! Redirecting to your dashboard...',
+                    showConfirmButton: false,
+                    timer: 2000
+                }).then(() => {
+                    window.location.href = 'dash.php';
+                });
+            </script>
+            ";
             exit();
         } else {
-            echo "Incorrect password.";
+            // ❌ Wrong password
+            echo "
+            <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
+            <script>
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Oops...',
+                    text: 'Incorrect password. Please try again!',
+                    confirmButtonColor: '#3085d6',
+                    confirmButtonText: 'Retry'
+                }).then(() => {
+                    window.location.href = 'login.php';
+                });
+            </script>
+            ";
         }
     } else {
-        echo "No user found with that email.";
+        // ❌ No user found
+        echo "
+        <script src='https://cdn.jsdelivr.net/npm/sweetalert2@11'></script>
+        <script>
+            Swal.fire({
+                icon: 'warning',
+                title: 'No User Found',
+                text: 'No account exists with that email!',
+                confirmButtonColor: '#3085d6',
+                confirmButtonText: 'OK'
+            }).then(() => {
+                window.location.href = 'login.php';
+            });
+        </script>
+        ";
     }
 }
 ?>

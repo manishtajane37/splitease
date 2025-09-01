@@ -4,13 +4,12 @@ include 'db.php';
 require_once 'functions.php';
 session_start();
 
-
-// 🔧 Enable error reporting
+// Enable error reporting
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-// ✅ Check login
+// Check login
 if (!isset($_SESSION['user_id'])) {
     echo "You must be logged in.";
     exit();
@@ -18,9 +17,7 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
-// ✅ Check group_id
-// ✅ Accept both 'id' and 'group_id' in URL
-// ✅ Accept group_id from GET or POST
+// Get group_id from GET or POST parameters
 $group_id = null;
 
 if (isset($_POST['group_id']) && is_numeric($_POST['group_id'])) {
@@ -36,7 +33,7 @@ if (!$group_id) {
     exit();
 }
 
-// ✅ Fetch group + creator name
+// Fetch group + creator name
 $stmt = $conn->prepare("SELECT g.*, u.username AS creator_name 
                         FROM groups g
                         JOIN users u ON g.created_by = u.id
@@ -52,10 +49,14 @@ if (!$group) {
     exit();
 }
 
-// ✅ Check if current user is group admin
+// Check if current user is group admin
 $is_admin = ($user_id == $group['created_by']);
 
-// ✅ If admin, fetch pending join requests
+// Initialize message variables
+$success_message = '';
+$error_message = '';
+
+// If admin, fetch pending join requests
 $pending_requests = [];
 if ($is_admin) {
     $stmt = $conn->prepare("
@@ -71,15 +72,14 @@ if ($is_admin) {
     $stmt->close();
 }
 
-
-// ✅ Check if user is member of this group OR is admin
+// Check if user is member of this group OR is admin
 $stmt = $conn->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
 $stmt->bind_param("ii", $group_id, $user_id);
 $stmt->execute();
 $is_member = $stmt->get_result()->num_rows > 0;
 $stmt->close();
 
-// ✅ Handle approve/reject join request (FIXED VERSION)
+// Handle approve/reject join request (SINGLE VERSION - removed duplicate)
 if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
     $req_id = intval($_POST['request_id']);
     $action = $_POST['action'];
@@ -93,7 +93,7 @@ if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
 
     if ($req_data) {
         if ($action === 'approve') {
-            // ✅ Check if already in group before inserting
+            // Check if already in group before inserting
             $check_stmt = $conn->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
             $check_stmt->bind_param("ii", $req_data['group_id'], $req_data['user_id']);
             $check_stmt->execute();
@@ -113,7 +113,7 @@ if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
             $stmt->execute();
             $stmt->close();
 
-            // ✅ FIXED: Send APPROVAL notification (moved to correct block)
+            // Send APPROVAL notification
             addNotification(
                 $conn,
                 $req_data['user_id'],
@@ -130,7 +130,7 @@ if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
             $stmt->execute();
             $stmt->close();
 
-            // ✅ Send REJECTION notification
+            // Send REJECTION notification
             addNotification(
                 $conn,
                 $req_data['user_id'],
@@ -142,12 +142,12 @@ if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
         }
     }
 
-    // 🔄 Reload the page after action
+    // Reload the page after action
     header("Location: view_group.php?group_id=" . $group_id);
     exit();
 }
 
-// ✅ Handle member removal (admin only)
+// Handle member removal (admin only)
 if (isset($_POST['remove_member']) && $is_admin) {
     $member_to_remove = intval($_POST['member_id']);
     
@@ -196,70 +196,7 @@ if (isset($_POST['remove_member']) && $is_admin) {
     }
 }
 
-// ✅ Handle approve/reject join request
-if ($is_admin && isset($_POST['action']) && isset($_POST['request_id'])) {
-    $req_id = intval($_POST['request_id']);
-    $action = $_POST['action'];
-
-    // Get request details
-    $stmt = $conn->prepare("SELECT group_id, user_id FROM group_join_requests WHERE id=? AND group_id=?");
-    $stmt->bind_param("ii", $req_id, $group_id);
-    $stmt->execute();
-    $req_data = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-
-    if ($req_data) {
-        if ($action === 'approve') {
-            // ✅ Check if already in group before inserting
-            $check_stmt = $conn->prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?");
-            $check_stmt->bind_param("ii", $req_data['group_id'], $req_data['user_id']);
-            $check_stmt->execute();
-            $is_already_member = $check_stmt->get_result()->num_rows > 0;
-            $check_stmt->close();
-
-            if (!$is_already_member) {
-                $stmt = $conn->prepare("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, NOW())");
-                $stmt->bind_param("ii", $req_data['group_id'], $req_data['user_id']);
-                $stmt->execute();
-                $stmt->close();
-            }
-
-            // Update request status
-            $stmt = $conn->prepare("UPDATE group_join_requests SET status='accepted' WHERE id=?");
-            $stmt->bind_param("i", $req_id);
-            $stmt->execute();
-            $stmt->close();
-
-            $success_message = "<div class='alert alert-success'>Member approved successfully!</div>";
-
-        } elseif ($action === 'reject') {
-            $stmt = $conn->prepare("UPDATE group_join_requests SET status='rejected' WHERE id=?");
-            $stmt->bind_param("i", $req_id);
-            $stmt->execute();
-            $stmt->close();
-
-                // ✅ Send notification to the user
-    addNotification(
-        $conn,
-        $req_data['user_id'],
-        "Your request to join group <strong>" . htmlspecialchars($group['name']) . "</strong> has been approved!",
-        "view_group.php?group_id=" . $group_id
-    );
-
-
-            $success_message = "<div class='alert alert-danger'>Request rejected.</div>";
-        }
-    }
-
-    // 🔄 Reload the page after action
-    header("Location: view_group.php?group_id=" . $group_id);
-    exit();
-}
-
-
-
-
-// ✅ Fetch group members with proper role indication
+// Fetch group members with proper role indication
 // Include creator even if not in group_members table
 $stmt = $conn->prepare("
     SELECT DISTINCT u.id, u.username, u.email, 
@@ -281,7 +218,7 @@ $members = $stmt->get_result();
 // Get member count for statistics
 $member_count = $members->num_rows;
 
-// ✅ Fetch expenses with multi-payer support - showing all payers
+// Fetch expenses with multi-payer support - showing all payers
 $stmt = $conn->prepare("SELECT e.*, 
     GROUP_CONCAT(DISTINCT CONCAT(u.username, ' (₹', FORMAT(ep.amount_paid, 2), ')') SEPARATOR ', ') as payers_info,
     GROUP_CONCAT(DISTINCT u.username SEPARATOR ', ') as payer_names,
@@ -297,7 +234,7 @@ $stmt->bind_param("i", $group_id);
 $stmt->execute();
 $expenses = $stmt->get_result();
 
-// ✅ Get total group statistics
+// Get total group statistics
 $stmt = $conn->prepare("SELECT COUNT(*) as total_expenses, 
                         COALESCE(SUM(amount), 0) as total_amount 
                         FROM expenses WHERE group_id = ?");
@@ -306,7 +243,7 @@ $stmt->execute();
 $group_stats = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-// ✅ Calculate user's financial summary with multi-payer support
+// Calculate user's financial summary with multi-payer support
 // Total paid by user (from expense_payers table)
 $stmt = $conn->prepare("SELECT COALESCE(SUM(ep.amount_paid), 0) AS total_paid 
                         FROM expense_payers ep
@@ -329,7 +266,7 @@ $stmt->close();
 
 $net = $paid - $owed;
 
-// ✅ Get settlements for this user
+// Get settlements for this user
 $stmt = $conn->prepare("SELECT 
     s.amount,
     payer.username as payer_name,
@@ -345,7 +282,7 @@ $stmt->bind_param("iii", $group_id, $user_id, $user_id);
 $stmt->execute();
 $settlements = $stmt->get_result();
 
-// ✅ Calculate balances for all members
+// Calculate balances for all members
 $balances = [];
 
 // Step 1: Fetch all group members (including creator)
@@ -396,12 +333,9 @@ while ($row = $member_result->fetch_assoc()) {
         'username' => $username,
         'net' => $member_net
     ];
-
-
 }
 $member_stmt->close();
 ?>
-
 
 <!DOCTYPE html>
 <html lang="en">
@@ -413,7 +347,6 @@ $member_stmt->close();
     <link rel="stylesheet" href="morden_style.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
     <style>
         /* Modern Enhanced Button Group Styles */
 .btn-group.flex-wrap .btn {
@@ -723,9 +656,8 @@ $member_stmt->close();
 <div class="container mt-4">
     
     <!-- Display success/error messages -->
-    <?php if (isset($success_message)) echo $success_message; ?>
-    <?php if (isset($error_message)) echo $error_message; ?>
-
+    <?php if (!empty($success_message)) echo $success_message; ?>
+    <?php if (!empty($error_message)) echo $error_message; ?>
 
     <!-- Enhanced Group Header -->
     <div class="group-header">
@@ -789,38 +721,37 @@ $member_stmt->close();
         </div>
     </div>
 
-
     <?php if ($is_admin && !empty($pending_requests)): ?>
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-warning text-dark">
-        <h5 class="mb-0"><i class="fas fa-user-clock me-2"></i>Pending Join Requests</h5>
-    </div>
-    <div class="card-body">
-        <?php foreach ($pending_requests as $req): ?>
-            <div class="d-flex justify-content-between align-items-center border-bottom py-2">
-                <div>
-                    <strong><?= htmlspecialchars($req['username']) ?></strong> 
-                    <small class="text-muted">(<?= htmlspecialchars($req['email']) ?>)</small><br>
-                    <small class="text-muted">Requested on <?= date("d M Y, h:i A", strtotime($req['requested_at'])) ?></small>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0"><i class="fas fa-user-clock me-2"></i>Pending Join Requests</h5>
+        </div>
+        <div class="card-body">
+            <?php foreach ($pending_requests as $req): ?>
+                <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                    <div>
+                        <strong><?= htmlspecialchars($req['username']) ?></strong> 
+                        <small class="text-muted">(<?= htmlspecialchars($req['email']) ?>)</small><br>
+                        <small class="text-muted">Requested on <?= date("d M Y, h:i A", strtotime($req['requested_at'])) ?></small>
+                    </div>
+                    <div>
+                        <form method="post" class="d-inline">
+                            <input type="hidden" name="request_id" value="<?= $req['request_id'] ?>">
+                            <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">
+                                <i class="fas fa-check"></i> Approve
+                            </button>
+                        </form>
+                        <form method="post" class="d-inline">
+                            <input type="hidden" name="request_id" value="<?= $req['request_id'] ?>">
+                            <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">
+                                <i class="fas fa-times"></i> Reject
+                            </button>
+                        </form>
+                    </div>
                 </div>
-                <div>
-                    <form method="post" class="d-inline">
-                        <input type="hidden" name="request_id" value="<?= $req['request_id'] ?>">
-                        <button type="submit" name="action" value="approve" class="btn btn-success btn-sm">
-                            <i class="fas fa-check"></i> Approve
-                        </button>
-                    </form>
-                    <form method="post" class="d-inline">
-                        <input type="hidden" name="request_id" value="<?= $req['request_id'] ?>">
-                        <button type="submit" name="action" value="reject" class="btn btn-danger btn-sm">
-                            <i class="fas fa-times"></i> Reject
-                        </button>
-                    </form>
-                </div>
-            </div>
-        <?php endforeach; ?>
+            <?php endforeach; ?>
+        </div>
     </div>
-</div>
 <?php endif; ?>
 
 
@@ -1116,6 +1047,21 @@ $member_stmt->close();
                 <a href="dash.php" class="btn btn-secondary btn-lg">
                     <i class="fas fa-arrow-left"></i> Back to Dashboard
                 </a>
+                <?php if ($is_admin): ?>
+    <?php if ($group['is_expenses_final'] == 0): ?>
+        <form method="POST" action="finalize_group.php" class="d-inline"
+              onsubmit="return confirm('⚠️ Once finalized, no new expenses can be added. Continue?')">
+            <input type="hidden" name="group_id" value="<?= $group_id ?>">
+            <button type="submit" class="btn btn-danger btn-lg mt-2">
+                <i class="fas fa-lock"></i> Finalize Expenses
+            </button>
+        </form>
+    <?php else: ?>
+        <div class="alert alert-success d-inline-block ms-3 p-2 mt-2">
+            <i class="fas fa-check-circle"></i> Expenses Finalized
+        </div>
+    <?php endif; ?>
+<?php endif; ?>
             </div>
         </div>
     </div>

@@ -53,17 +53,14 @@ try {
     $payer_name = $settlement['payer_name'] ?? 'Unknown User';
     $receiver_name = $settlement['receiver_name'] ?? 'Unknown User';
 
-    // Log for debugging
-    error_log("SETTLEMENT APPROVAL: ID {$settlement_id}, Status: {$current_status}, User: {$user_id}, Payer: {$payer}, Receiver: {$receiver}");
-
-    // Handle different approval scenarios
+    // ✅ MAIN FIX: Handle different approval scenarios properly
     if ($current_status === 'awaiting_confirmation') {
         // Only the receiver can confirm payments
         if ($user_id !== $receiver) {
             throw new Exception("Only the payment receiver can confirm this settlement.");
         }
         
-        // Confirm the payment
+        // Confirm the payment - mark as completed
         $now = date("Y-m-d H:i:s");
         $update_stmt = $conn->prepare("
             UPDATE settlements 
@@ -129,48 +126,10 @@ try {
 
         $_SESSION['success'] = "Settlement cancelled successfully!";
 
-    } elseif (in_array($current_status, ['pending', 'partial'])) {
-        // CRITICAL FIX: ALWAYS require confirmation workflow for consistency
-        // This ensures every settlement follows the same process regardless of who initiates
-        
-        $now = date("Y-m-d H:i:s");
-        $update_stmt = $conn->prepare("
-            UPDATE settlements 
-            SET status = 'awaiting_confirmation', 
-                updated_at = ?
-            WHERE id = ?
-        ");
-        $update_stmt->bind_param("si", $now, $settlement_id);
-        
-        if (!$update_stmt->execute()) {
-            throw new Exception("Failed to update settlement status.");
-        }
-
-        // Send appropriate notifications based on who initiated
-        $amount_formatted = number_format($amount, 2);
-        
-        if ($user_id == $payer) {
-            // Payer marked as paid - needs receiver confirmation
-            addNotification($conn, $receiver, "{$payer_name} marked ₹{$amount_formatted} as paid. Please confirm if you received the payment.", "settlements.php");
-            addNotification($conn, $payer, "You marked ₹{$amount_formatted} as paid. Waiting for {$receiver_name} to confirm receipt.", "settlements.php");
-            $_SESSION['success'] = "Payment marked as sent. Waiting for receiver to confirm.";
-            
-            error_log("PAYER MARKED PAID: Settlement {$settlement_id} set to awaiting_confirmation");
-            
-        } elseif ($user_id == $receiver) {
-            // Receiver marked as received - needs payer confirmation (for consistency)
-            addNotification($conn, $payer, "{$receiver_name} confirmed receiving ₹{$amount_formatted}. Please verify you made this payment.", "settlements.php");
-            addNotification($conn, $receiver, "You confirmed receiving ₹{$amount_formatted}. Waiting for {$payer_name} to verify payment.", "settlements.php");
-            $_SESSION['success'] = "Payment marked as received. Waiting for payer to verify.";
-            
-            error_log("RECEIVER MARKED RECEIVED: Settlement {$settlement_id} set to awaiting_confirmation");
-            
-        } else {
-            throw new Exception("You don't have permission to approve this settlement.");
-        }
-
     } else {
-        throw new Exception("This settlement cannot be approved. Current status: " . $current_status);
+        // ✅ REMOVED THE PROBLEMATIC LOGIC FOR pending/partial status
+        // This page should only handle awaiting_confirmation and cancel_request
+        throw new Exception("This settlement cannot be processed in its current state. Status: " . $current_status);
     }
 
     // Verify the update was successful (only if update_stmt was executed)
@@ -181,13 +140,11 @@ try {
     // Commit the transaction
     $conn->commit();
     
-    error_log("SETTLEMENT UPDATE SUCCESS: ID {$settlement_id}, New Status: " . ($current_status === 'awaiting_confirmation' ? 'paid' : 'awaiting_confirmation'));
-    
 } catch (Exception $e) {
     // Rollback transaction on error
     $conn->rollback();
     
-    // Log the error
+    // Log the error (in a real application, you'd use proper logging)
     error_log("Settlement approval error: " . $e->getMessage() . " - User ID: {$user_id}, Settlement ID: {$settlement_id}");
     
     // Set error message for user
