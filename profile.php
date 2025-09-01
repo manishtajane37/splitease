@@ -120,10 +120,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute();
             $result = $stmt->get_result();
             if ($result->num_rows > 0) {
-                $error_message = "Email address is already in use by another account.";
+                $error_message = "Email Address is already in use by another account";
             }
             $stmt->close();
-        }
+        } 
 
         if (empty($error_message)) {
             // Keep existing profile pic unless new uploaded or removed
